@@ -110,72 +110,74 @@ void setup() {
   M5.Lcd.println("M5Core2 Sensor Uploader");
   M5.Lcd.println("Press A for Latest Data");
 }
+// Allow button to be pressed
+unsigned long previousMillis = 0;
+const unsigned long interval = 2000;
 
 //////////////////////////////////////////////
 // Main Loop
 //////////////////////////////////////////////
 void loop() {
-  M5.update();
+  M5.update();  // Always update button states at the beginning
 
-  // If Button A is pressed, navigate to the Latest Data screen.
+  // Check if Button A is pressed to show latest data
   if (M5.BtnA.wasPressed()) {
     fetchAndDisplayLatestData();
-    // Show a prompt to return.
     M5.Lcd.setTextSize(2);
     M5.Lcd.println("\nPress B to return");
-    // Wait until Button B is pressed.
-    while (true) {
+
+    // Wait until Button B is pressed, but keep updating the buttons
+    while (!M5.BtnB.wasPressed()) {
       M5.update();
-      if (M5.BtnB.wasPressed()) {
-        // Clear the screen and show the main screen again.
-        M5.Lcd.fillScreen(BLACK);
-        M5.Lcd.setCursor(0, 0);
-        M5.Lcd.setTextSize(2);
-        M5.Lcd.println("M5Core2 Sensor Uploader");
-        M5.Lcd.println("Press A for Latest Data");
-        break;
-      }
-      delay(100);
+      delay(10);  // Short delay to ease CPU load
     }
+    // Clear the screen and show the main screen again
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.println("M5Core2 Sensor Uploader");
+    M5.Lcd.println("Press A for Latest Data");
   }
 
-  // ----- Normal Sensor Reading & Uploading Process -----
-  // Read sensor values
-  uint16_t prox = vcnl4040.getProximity();
-  uint16_t ambientLight = vcnl4040.getLux();
-  uint16_t whiteLight = vcnl4040.getWhiteLight();
-  sensors_event_t rHum, temp;
-  sht4.getEvent(&rHum, &temp);
-  float temperatureF = convertCintoF(temp.temperature);
-  float humidity = rHum.relative_humidity;
-  float accX, accY, accZ;
-  M5.IMU.getAccelData(&accX, &accY, &accZ);
-  accX *= 9.8;
-  accY *= 9.8;
-  accZ *= 9.8;
+  // Non-blocking sensor reading & uploading process
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
 
-  // Update time
-  timeClient.update();
-  unsigned long epochTime = timeClient.getEpochTime();
-  // Use milliseconds for the capture time (as expected by your Firestore document)
-  unsigned long epochMillis = epochTime * 1000;
+    // Read sensor values
+    uint16_t prox = vcnl4040.getProximity();
+    uint16_t ambientLight = vcnl4040.getLux();
+    uint16_t whiteLight = vcnl4040.getWhiteLight();
+    sensors_event_t rHum, temp;
+    sht4.getEvent(&rHum, &temp);
+    float temperatureF = convertCintoF(temp.temperature);
+    float humidity = rHum.relative_humidity;
+    float accX, accY, accZ;
+    M5.IMU.getAccelData(&accX, &accY, &accZ);
+    accX *= 9.8;
+    accY *= 9.8;
+    accZ *= 9.8;
 
-  // Prepare the device details structure
-  deviceDetails details;
-  details.prox = prox;
-  details.ambientLight = ambientLight;
-  details.whiteLight = whiteLight;
-  details.temp = temp.temperature;
-  details.rHum = humidity;
-  details.accX = accX;
-  details.accY = accY;
-  details.accZ = accZ;
+    // Update time
+    timeClient.update();
+    unsigned long epochTime = timeClient.getEpochTime();
 
-  // Upload sensor data using a GET with custom headers (your original method)
-  gcfGetWithHeader(URL_GCF_UPLOAD, userId, epochTime, &details);
+    // Prepare device details structure
+    deviceDetails details;
+    details.prox = prox;
+    details.ambientLight = ambientLight;
+    details.whiteLight = whiteLight;
+    details.temp = temp.temperature;
+    details.rHum = humidity;
+    details.accX = accX;
+    details.accY = accY;
+    details.accZ = accZ;
 
-  delay(timerDelayMs);
+    // Upload sensor data using a GET with custom headers
+    gcfGetWithHeader(URL_GCF_UPLOAD, userId, epochTime, &details);
+  }
 }
+
 
 //////////////////////////////////////////////
 // Function: Fetch & Display Latest Sensor Data
@@ -278,7 +280,7 @@ String generateM5DetailsHeader(String userId, time_t time, deviceDetails *detail
   objM5Details["az"] = details->accZ;
   
   JsonObject objOtherDetails = doc.createNestedObject("otherDetails");
-  objOtherDetails["captureTime"] = time * 1000;
+  objOtherDetails["captureTime"] = (uint64_t)time * 1000;
   objOtherDetails["userId"] = userId;
   
   String output;
